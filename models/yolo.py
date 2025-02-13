@@ -31,7 +31,7 @@ class Detect(nn.Module): #we will add the pose to this calass
         super(Detect, self).__init__()
         self.nc = nc  # number of classes
         self.nk = 5 
-        self.no = (nc + 5) + (self.nk*2) # number of outputs per anchor
+        self.no = (nc + 5) + (self.nk*2) # number of outputs per anchor 5= bg_cls x,y,h,w 
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
@@ -41,14 +41,16 @@ class Detect(nn.Module): #we will add the pose to this calass
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv  
         
         
-    def forward(self, x):
+    def forward(self, x): 
+        
+        # x is a list of size 3  each of size [ [b, 128, 64, 64], [b, 256, 32, 32], [b, 512, 16, 16] ]
         # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
         for i in range(self.nl):
-            x[i] = self.m[i](x[i])  # conv
+            x[i] = self.m[i](x[i])  # conv # (b, 48[self.no * self.na], w, h)
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
-            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()            
+            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()      # (b, 48[self.no * self.na], w, h) -> (b, self.na, w, h, self.no)     batch, num_anchors, w, h, num_outputs   
             
             if not self.training:  # inference
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
@@ -56,14 +58,15 @@ class Detect(nn.Module): #we will add the pose to this calass
                 
                 # BBox 
                 y = x[i].sigmoid()
+                # assert False
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 
                 #Keypoint 
-                kpts = y[..., 5 + self.nc:].view(bs, self.na, ny, nx, self.nk, 2)
-                kpts = (kpts * 2. - 0.5 + self.grid[i].unsqueeze(-2)) * self.stride[i]  # decode keypoints
-                y = torch.cat((y[..., :5+self.nc], kpts.view(bs, self.na, ny, nx, -1)), -1)
-                
+                for j in range(self.nk):
+                    start = 5 + j*2
+                    y[..., start: start+2] = (y[..., start: start+2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy 
+                    
                 z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
