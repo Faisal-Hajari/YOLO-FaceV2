@@ -211,7 +211,8 @@ def train(hyp, opt, device, tb_writer=None):
             if plots:
                 plot_labels(labels, names, save_dir, loggers)
                 if tb_writer:
-                    tb_writer.add_histogram('classes', c, 0)
+                    pass
+                    # tb_writer.add_histogram('classes', c, 0)
 
             # Anchors
             if not opt.noautoanchor:
