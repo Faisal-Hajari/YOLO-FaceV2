@@ -64,7 +64,7 @@ class Detect(nn.Module): #we will add the pose to this calass
                 
                 #Keypoint 
                 for j in range(self.nk):
-                    start = 5 + j*2
+                    start = (self.nc + 5)  + j*2 
                     y[..., start: start+2] = (y[..., start: start+2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy 
                     
                 z.append(y.view(bs, -1, self.no))
