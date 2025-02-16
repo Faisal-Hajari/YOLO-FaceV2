@@ -17,7 +17,8 @@ import os
 from os import getcwd
 
 # file list - train.txt, test.txt, val.txt
-sets = ['train', 'val']
+# sets = ['train', 'val']
+sets = ['train']
 
 # class name
 classes = ["face"]
@@ -36,6 +37,12 @@ def convert(size, box):
     h = h * dh
     return (x, y, w, h)
 
+def kpts_convert(size, kpts):
+    dw = 1. / size[0]
+    dh = 1. / size[1]
+    # print(kpts)
+    kpts = [kpts[idx]*dw if idx%2==0 else kpts[idx]*dh for idx in range(len(kpts))]
+    return kpts
 
 def convert_annotation(image_id):
     in_file = open('Annotations/%s.xml' % (image_id))
@@ -56,6 +63,18 @@ def convert_annotation(image_id):
         b = (float(xmlbox.find('xmin').text), float(xmlbox.find('xmax').text), float(xmlbox.find('ymin').text),
              float(xmlbox.find('ymax').text))
         bb = convert((w, h), b)
+        
+        xmlkpt = obj.find('kpt')
+        # print("xmlkpt contents:", ET.tostring(xmlkpt, encoding='unicode') if xmlkpt is not None else "None")
+        # exit()
+        kpts = [] 
+        for i in range(1, 6): 
+            kpts.extend([float(xmlkpt.find(f'x{i}').text),
+                         float(xmlkpt.find(f'y{i}').text)])
+   
+        kpts = kpts_convert((w, h), kpts)
+        bb = list(bb)
+        bb.extend(kpts)
         out_file.write(str(cls_id) + " " + " ".join([str(a) for a in bb]) + '\n')
 
 
