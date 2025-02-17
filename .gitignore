@@ -118,3 +118,10 @@ venv.bak/
 # seed project
 lightning_logs/
 .DS_Store
+
+*.xml
+*.json 
+*.txt
+*.mat
+*.cache
+*.zip 

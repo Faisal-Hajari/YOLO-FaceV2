@@ -299,12 +299,17 @@ def segment2box(segment, width=640, height=640):
 
 
 def segments2boxes(segments):
+    #Modify this to return the bbox of the label
+    #The voc_label.py saves the bbox as a normlized x, y, w, h #line 38 
     # Convert segment labels to box labels, i.e. (cls, xy1, xy2, ...) to (cls, xywh)
     boxes = []
     for s in segments:
-        x, y = s.T  # segment xy
-        boxes.append([x.min(), y.min(), x.max(), y.max()])  # cls, xyxy
-    return xyxy2xywh(np.array(boxes))  # cls, xywh
+        # x, y = s.T  # segment xy
+        # boxes.append([x.min(), y.min(), x.max(), y.max()])  # cls, xyxy
+        boxes = s.flatten()[:4]
+    
+    return np.array(boxes)  # cls, xywh
+    # return xyxy2xywh(np.array(boxes))  # cls, xywh
 
 
 def resample_segments(segments, n=1000):

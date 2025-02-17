@@ -36,7 +36,7 @@ from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_di
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 
 
-PRINT_EVERY_EPOCH = 50 
+PRINT_EVERY_EPOCH = 1
 
 logger = logging.getLogger(__name__)
 

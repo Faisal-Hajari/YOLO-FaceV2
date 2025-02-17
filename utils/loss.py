@@ -145,6 +145,9 @@ class ComputeLoss:
             setattr(self, k, getattr(det, k))
 
     def __call__(self, p, targets):  # predictions, targets, model
+        # p is a list of size 3, each element is a tensor of size [bs, 3, h, w, 16] (original: [bs, 3, h, w, 1+5])
+        # targets are a tensor of size [num_obj, 6]. 
+        #TODO: the targets should be a [num_obj, 16] where the keypoints are added 
         device = targets.device
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         lrepBox, lrepGT = torch.zeros(1, device=device), torch.zeros(1, device=device)
@@ -158,22 +161,45 @@ class ComputeLoss:
             n = b.shape[0]  # number of targets
             if n:
                 ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
-
+                #seperate the bbox calculastion and the keypoint calculation
+                pboxes = ps[:, :self.nc+5]
+                pkpt = ps[:, self.nc+5:]
+                
+                # ps = ps[:, :5 + self.nc]  # remove keypoints  #5 + self.nc = 6 
                 # Regression
-                pxy = ps[:, :2].sigmoid() * 2. - 0.5
-                pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+                pxy = pboxes[:, :2].sigmoid() * 2. - 0.5
+                pwh = (pboxes[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+                
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
                 iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
                 nwd = torch.exp(-torch.pow(Wasserstein(pbox.T, tbox[i], x1y1x2y2=False), 1 / 2) / self.C)
                 auto_iou = iou.mean()
                 # lbox += (1.0 - iou).mean()  # iou loss
                 lbox += 0.8 * (1.0 - iou).mean() + 0.2 * (1.0 - nwd).mean()
+                
+                x1, x2 = tbox[i][1] - tbox[i][2] / 2, tbox[i][0] + tbox[i][2] / 2
+                y1, y2 = tbox[i][1] - tbox[i][3] / 2, tbox[i][1] + tbox[i][3] / 2
+                
+                #calculate the keypoint loss function here ?
+                pkpt_xy = pkpt.sigmoid() * 2. - 0.5
+                tkpt_layer = tkpt[i]
+                
+                #d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
 
+                distance = (pkpt_xy[..., 0] - tkpt_layer[..., 0]).pow(2) + \
+                            (pkpt_xy[..., 1] - tkpt_layer[..., 1]).pow(2)
+                area = (x2 - x1) * (y2 - y1)
+                e = distance / ((2 * self.sigmas).pow(2) * (area + 1e-9) * 2) #TODO: we need to add sigmas 
+                kpt_loss_factor = 10 # This should be the number of objects in the image 
+                # (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
+                
+                #end of keypoint loss function
                 # Objectness
                 tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
 
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
+                    #this if is disregarded 
                     t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
                     t[range(n), tcls[i]] = self.cp
                     if self.u > 0:
@@ -242,9 +268,9 @@ class ComputeLoss:
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
-        tcls, tbox, indices, anch = [], [], [], []
+        tcls, tbox, indices, anch = [], [], [], [] #TODO: add tkpoints here ? 
         gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
-        ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
+        ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt) #it create ai of shape [number of anchors, number of targets] and fell each row with a number (row 0 = [0,....], row 1 = [1,....], row 2 = [2,....], etc)
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
         g = 0.5  # bias
@@ -254,15 +280,17 @@ class ComputeLoss:
                             ], device=targets.device).float() * g  # offsets
 
         for i in range(self.nl):
+            #go through each layer of the model
+            #self.anchors are of the shape [nl, num of anchors, 2] this might need to be increased to 12 if we add keypoints
             anchors = self.anchors[i]
-            gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
+            gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain #slice the h, w size 
 
             # Match targets to anchors
             t = targets * gain
             if nt:
                 # Matches
                 r = t[:, :, 4:6] / anchors[:, None]  # wh ratio
-                j = torch.max(r, 1. / r).max(2)[0] < self.hyp['anchor_t']  # compare
+                j = torch.max(r, 1. / r).max(2)[0] < self.hyp['anchor_t']  # compare #search for the anchors that have the same aspict ratio ?
                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
                 t = t[j]  # filter
 
